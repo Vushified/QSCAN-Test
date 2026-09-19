@@ -1,0 +1,69 @@
+name: ECDAT Quantum Security Gate
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quantum-scan:
+    name: Quantum Cryptography Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger ECDAT scan
+        id: trigger
+        run: |
+          RESPONSE=$(curl -s -X POST "${{ secrets.ECDAT_API_URL }}/api/scan" \
+            -H "Content-Type: application/json" \
+            -d '{"source_type":"github_repo","target":"${{ github.repository }}"}')
+          echo "Response: $RESPONSE"
+          BATCH_ID=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan_batch_id',''))")
+          if [ -z "$BATCH_ID" ]; then
+            echo "ERROR: No batch ID returned"
+            exit 1
+          fi
+          echo "batch_id=$BATCH_ID" >> $GITHUB_OUTPUT
+          echo "ECDAT scan started: $BATCH_ID"
+
+      - name: Wait for scan completion
+        run: |
+          BATCH_ID="${{ steps.trigger.outputs.batch_id }}"
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s "${{ secrets.ECDAT_API_URL }}/api/scan/$BATCH_ID/status" \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")
+            echo "Attempt $i: Status = $STATUS"
+            if [ "$STATUS" = "done" ]; then break; fi
+            if [ "$STATUS" = "failed" ]; then echo "Scan failed"; exit 1; fi
+            sleep 10
+          done
+
+      - name: Check QEI threshold
+        run: |
+          BATCH_ID="${{ steps.trigger.outputs.batch_id }}"
+          THRESHOLD=${{ vars.ECDAT_QEI_THRESHOLD || '70' }}
+          QEI=$(curl -s "${{ secrets.ECDAT_API_URL }}/api/qei/$BATCH_ID" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('score',0))")
+          echo "QEI Score: $QEI | Threshold: $THRESHOLD"
+          if python3 -c "import sys; sys.exit(0 if float('$QEI') <= float('$THRESHOLD') else 1)"; then
+            echo "PASS: QEI $QEI within threshold $THRESHOLD"
+          else
+            echo "FAIL: QEI $QEI exceeds threshold $THRESHOLD"
+            echo "View findings: ${{ secrets.ECDAT_API_URL }}/dashboard?batch=$BATCH_ID"
+            exit 1
+          fi
+
+      - name: Post scan summary
+        if: always()
+        run: |
+          BATCH_ID="${{ steps.trigger.outputs.batch_id }}"
+          QEI=$(curl -s "${{ secrets.ECDAT_API_URL }}/api/qei/$BATCH_ID" 2>/dev/null \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('score','N/A'))" 2>/dev/null || echo "N/A")
+          echo "## ECDAT Quantum Security Report" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| QEI Score | $QEI / 100 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Threshold | ${{ vars.ECDAT_QEI_THRESHOLD || '70' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Batch | $BATCH_ID |" >> $GITHUB_STEP_SUMMARY

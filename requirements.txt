@@ -1,0 +1,4 @@
+pycryptodome==3.9.8
+paramiko==2.7.1
+pyOpenSSL==19.0.0
+requests==2.25.1
