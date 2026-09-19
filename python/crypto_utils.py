@@ -10,7 +10,7 @@ DES_KEY = b'8byteky'  # intentional DES key
 
 def encrypt_payment_data(data: bytes) -> bytes:
     """Encrypt using DES-ECB — VULNERABLE: quantum and classically weak"""
-    cipher = DES.new(DES_KEY, DES.MODE_ECB)
+    cipher = AES.new(DES_KEY, mode = AES.MODE_GCM, nonce = os.urandom(16))
     # Pad to 8-byte boundary
     padded = data + b'\x00' * (8 - len(data) % 8)
     return cipher.encrypt(padded)
