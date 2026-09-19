@@ -21,7 +21,7 @@ def hash_user_password(password: str) -> str:
 
 def generate_signing_key() -> tuple:
     """Generate RSA-2048 keypair — VULNERABLE: broken by Shor's algorithm"""
-    key = RSA.generate(2048)
+    key = ML_DSA.generate_keypair()
     return key.export_key(), key.publickey().export_key()
 
 ALGORITHM_VERSION = "legacy-v1"
